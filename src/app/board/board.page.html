@@ -1,0 +1,105 @@
+<ion-header [translucent]="true">
+  <ion-toolbar>
+    <ion-title>Kanban Board</ion-title>
+    <ion-buttons slot="end">
+      <ion-button fill="outline" (click)="createNewItem()">
+        <ion-icon name="add" slot="start"></ion-icon>
+        New Item
+      </ion-button>
+    </ion-buttons>
+  </ion-toolbar>
+  
+  <!-- Filters Toolbar -->
+  <ion-toolbar>
+    <div class="filters-container">
+      <ion-select 
+        placeholder="Filter by Type" 
+        [value]="filterType" 
+        (ionChange)="onFilterTypeChange($event)"
+        interface="popover">
+        <ion-select-option value="all">All Types</ion-select-option>
+        <ion-select-option [value]="WorkItemType.Epic">Epic</ion-select-option>
+        <ion-select-option [value]="WorkItemType.UserStory">User Story</ion-select-option>
+        <ion-select-option [value]="WorkItemType.Task">Task</ion-select-option>
+        <ion-select-option [value]="WorkItemType.Bug">Bug</ion-select-option>
+      </ion-select>
+      
+      <ion-select 
+        placeholder="Filter by Priority" 
+        [value]="filterPriority" 
+        (ionChange)="onFilterPriorityChange($event)"
+        interface="popover">
+        <ion-select-option value="all">All Priorities</ion-select-option>
+        <ion-select-option [value]="WorkItemPriority.High">High</ion-select-option>
+        <ion-select-option [value]="WorkItemPriority.Medium">Medium</ion-select-option>
+        <ion-select-option [value]="WorkItemPriority.Low">Low</ion-select-option>
+      </ion-select>
+      
+      <ion-input 
+        placeholder="Filter by Assignee" 
+        [value]="filterAssignee"
+        (ionInput)="onFilterAssigneeChange($event)"
+        clearInput="true">
+      </ion-input>
+    </div>
+  </ion-toolbar>
+</ion-header>
+
+<ion-content [fullscreen]="true">
+  <div class="kanban-board">
+    <div 
+      class="kanban-column" 
+      *ngFor="let column of columns"
+      (dragover)="onDragOver($event)"
+      (drop)="onDrop($event, column.status)">
+      
+      <div class="column-header">
+        <h3>{{ column.title }}</h3>
+        <ion-badge [color]="column.color">{{ getItemsForColumn(column.status).length }}</ion-badge>
+      </div>
+      
+      <div class="column-content">
+        <ion-card 
+          class="work-item-card"
+          *ngFor="let item of getItemsForColumn(column.status); trackBy: trackByItemId"
+          draggable="true"
+          (dragstart)="onDragStart($event, item)">
+          
+          <ion-card-header>
+            <ion-card-title>{{ item.title }}</ion-card-title>
+          </ion-card-header>
+          
+          <ion-card-content>
+            <p *ngIf="item.description" class="item-description">{{ item.description }}</p>
+            
+            <div class="item-meta">
+              <ion-chip [color]="getTypeColor(item.type)" size="small">
+                {{ item.type }}
+              </ion-chip>
+              <ion-chip [color]="getPriorityColor(item.priority)" size="small">
+                {{ item.priority }}
+              </ion-chip>
+              <ion-chip *ngIf="item.assignee" color="outline" size="small">
+                {{ item.assignee }}
+              </ion-chip>
+            </div>
+            
+            <div class="item-actions">
+              <ion-button fill="clear" size="small" color="primary">
+                <ion-icon name="create"></ion-icon>
+              </ion-button>
+              <ion-button fill="clear" size="small" color="danger" (click)="onDeleteItem(item, $event)">
+                <ion-icon name="trash"></ion-icon>
+              </ion-button>
+            </div>
+          </ion-card-content>
+        </ion-card>
+        
+        <!-- Empty state for columns -->
+        <div *ngIf="getItemsForColumn(column.status).length === 0" class="empty-column">
+          <p>No items</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</ion-content>
