@@ -1,12 +1,15 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { BehaviorSubject, Observable, throwError } from 'rxjs';
+import { catchError, tap, map } from 'rxjs/operators';
 import { 
   WorkItem, 
   WorkItemType, 
   WorkItemPriority, 
   WorkItemStatus, 
   CreateWorkItemRequest, 
-  UpdateWorkItemRequest 
+  UpdateWorkItemRequest,
+  ApiErrorResponse
 } from '../models/work-item.model';
 
 const STORAGE_KEY = 'kanban_work_items';
@@ -15,154 +18,160 @@ const STORAGE_KEY = 'kanban_work_items';
   providedIn: 'root'
 })
 export class WorkItemsService {
-  private workItemsSubject = new BehaviorSubject<WorkItem[]>(this.loadFromStorage());
+  private readonly baseUrl = 'http://localhost:8080/api/workitems';
+  private workItemsSubject = new BehaviorSubject<WorkItem[]>([]);
   public workItems$: Observable<WorkItem[]> = this.workItemsSubject.asObservable();
+  
+  private loadingSubject = new BehaviorSubject<boolean>(false);
+  public loading$ = this.loadingSubject.asObservable();
 
-  constructor() {
-    // Initialize with mock data if no data exists
-    if (this.workItemsSubject.value.length === 0) {
-      this.initializeMockData();
+  constructor(private http: HttpClient) {
+    this.loadAllWorkItems();
+  }
+
+  private handleError(error: HttpErrorResponse) {
+    let errorMessage = 'An unknown error occurred';
+    
+    if (error.error instanceof ErrorEvent) {
+      // Client-side error
+      errorMessage = `Error: ${error.error.message}`;
+    } else {
+      // Server-side error
+      const apiError = error.error as ApiErrorResponse;
+      errorMessage = apiError?.message || `Error Code: ${error.status}\nMessage: ${error.message}`;
     }
+    
+    console.error('WorkItems API Error:', errorMessage);
+    return throwError(() => new Error(errorMessage));
   }
 
-  private generateId(): string {
-    return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  private setLoading(loading: boolean) {
+    this.loadingSubject.next(loading);
   }
 
-  private loadFromStorage(): WorkItem[] {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      console.error('Error loading from storage:', error);
-      return [];
-    }
-  }
+  // Core CRUD Operations
 
-  private saveToStorage(items: WorkItem[]): void {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    } catch (error) {
-      console.error('Error saving to storage:', error);
-    }
-  }
-
-  private updateWorkItems(items: WorkItem[]): void {
-    this.workItemsSubject.next(items);
-    this.saveToStorage(items);
-  }
-
-  private initializeMockData(): void {
-    const now = new Date().toISOString();
-    const mockItems: WorkItem[] = [
-      {
-        id: this.generateId(),
-        title: 'Setup Project Infrastructure',
-        description: 'Initialize the project with proper folder structure and dependencies',
-        type: WorkItemType.Epic,
-        priority: WorkItemPriority.High,
-        assignee: 'John Doe',
-        status: WorkItemStatus.NotStarted,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        id: this.generateId(),
-        title: 'User Authentication System',
-        description: 'As a user, I want to securely log in to access the application',
-        type: WorkItemType.UserStory,
-        priority: WorkItemPriority.High,
-        assignee: 'Jane Smith',
-        status: WorkItemStatus.InProgress,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        id: this.generateId(),
-        title: 'Design login form UI',
-        description: 'Create responsive login form with validation',
-        type: WorkItemType.Task,
-        priority: WorkItemPriority.Medium,
-        assignee: 'Alice Johnson',
-        status: WorkItemStatus.Completed,
-        createdAt: now,
-        updatedAt: now
-      },
-      {
-        id: this.generateId(),
-        title: 'Fix navigation menu overlay issue',
-        description: 'Navigation menu overlaps content on mobile devices',
-        type: WorkItemType.Bug,
-        priority: WorkItemPriority.Low,
-        assignee: 'Bob Wilson',
-        status: WorkItemStatus.NotStarted,
-        createdAt: now,
-        updatedAt: now
+  /**
+   * Load all work items from backend
+   */
+  loadAllWorkItems(): void {
+    this.setLoading(true);
+    this.http.get<WorkItem[]>(`${this.baseUrl}`).pipe(
+      catchError(this.handleError),
+      tap(() => this.setLoading(false))
+    ).subscribe({
+      next: (items) => this.workItemsSubject.next(items),
+      error: (error) => {
+        this.setLoading(false);
+        console.error('Failed to load work items:', error);
+        // Keep existing items on error
       }
-    ];
-
-    this.updateWorkItems(mockItems);
+    });
   }
 
-  // API-like methods
+  /**
+   * Get all work items (returns observable)
+   */
   getWorkItems(): Observable<WorkItem[]> {
     return this.workItems$;
   }
 
-  createWorkItem(request: CreateWorkItemRequest): WorkItem {
-    const now = new Date().toISOString();
-    const newItem: WorkItem = {
-      id: this.generateId(),
-      title: request.title,
-      description: request.description,
-      type: request.type,
-      priority: request.priority,
-      assignee: request.assignee,
-      status: request.status || WorkItemStatus.NotStarted,
-      createdAt: now,
-      updatedAt: now
+  /**
+   * Create new work item
+   */
+  createWorkItem(request: CreateWorkItemRequest): Observable<WorkItem> {
+    this.setLoading(true);
+    return this.http.post<WorkItem>(`${this.baseUrl}`, request).pipe(
+      catchError(this.handleError),
+      tap(newItem => {
+        this.setLoading(false);
+        const currentItems = this.workItemsSubject.value;
+        this.workItemsSubject.next([...currentItems, newItem]);
+      })
+    );
+  }
+
+  /**
+   * Update existing work item
+   */
+  updateWorkItem(id: string, request: UpdateWorkItemRequest): Observable<WorkItem> {
+    this.setLoading(true);
+    return this.http.put<WorkItem>(`${this.baseUrl}/${id}`, request).pipe(
+      catchError(this.handleError),
+      tap(updatedItem => {
+        this.setLoading(false);
+        const currentItems = this.workItemsSubject.value;
+        const index = currentItems.findIndex(item => item.id === id);
+        if (index !== -1) {
+          const updatedItems = [...currentItems];
+          updatedItems[index] = updatedItem;
+          this.workItemsSubject.next(updatedItems);
+        }
+      })
+    );
+  }
+
+  /**
+   * Delete work item
+   */
+  deleteWorkItem(id: string): Observable<void> {
+    this.setLoading(true);
+    return this.http.delete<void>(`${this.baseUrl}/${id}`).pipe(
+      catchError(this.handleError),
+      tap(() => {
+        this.setLoading(false);
+        const currentItems = this.workItemsSubject.value;
+        const filteredItems = currentItems.filter(item => item.id !== id);
+        this.workItemsSubject.next(filteredItems);
+      })
+    );
+  }
+
+  /**
+   * Move work item to different status (drag & drop helper)
+   */
+  moveWorkItem(id: string, newStatus: WorkItemStatus): Observable<WorkItem> {
+    console.log('Service: moveWorkItem called with id:', id, 'newStatus:', newStatus);
+    this.setLoading(true);
+    
+    // Use PUT request with the full update payload to avoid CORS preflight issues
+    const updateRequest: UpdateWorkItemRequest = {
+      status: newStatus
     };
-
-    const currentItems = this.workItemsSubject.value;
-    this.updateWorkItems([...currentItems, newItem]);
-    return newItem;
+    
+    console.log('Service: Making PUT request to:', `${this.baseUrl}/${id}`);
+    console.log('Service: Request payload:', updateRequest);
+    
+    return this.http.put<WorkItem>(`${this.baseUrl}/${id}`, updateRequest).pipe(
+      catchError(this.handleError),
+      tap(updatedItem => {
+        console.log('Service: Move successful, updated item:', updatedItem);
+        this.setLoading(false);
+        const currentItems = this.workItemsSubject.value;
+        const index = currentItems.findIndex(item => item.id === id);
+        if (index !== -1) {
+          const updatedItems = [...currentItems];
+          updatedItems[index] = updatedItem;
+          this.workItemsSubject.next(updatedItems);
+          console.log('Service: Local state updated');
+        } else {
+          console.warn('Service: Item not found in local state for update:', id);
+        }
+      })
+    );
   }
 
-  updateWorkItem(id: string, request: UpdateWorkItemRequest): WorkItem | null {
-    const currentItems = this.workItemsSubject.value;
-    const itemIndex = currentItems.findIndex(item => item.id === id);
-    
-    if (itemIndex === -1) {
-      return null;
-    }
-
-    const updatedItem: WorkItem = {
-      ...currentItems[itemIndex],
-      ...request,
-      updatedAt: new Date().toISOString()
-    };
-
-    const updatedItems = [...currentItems];
-    updatedItems[itemIndex] = updatedItem;
-    
-    this.updateWorkItems(updatedItems);
-    return updatedItem;
+  /**
+   * Refresh all work items from server
+   */
+  refresh(): void {
+    this.loadAllWorkItems();
   }
 
-  deleteWorkItem(id: string): boolean {
-    const currentItems = this.workItemsSubject.value;
-    const filteredItems = currentItems.filter(item => item.id !== id);
-    
-    if (filteredItems.length === currentItems.length) {
-      return false; // Item not found
-    }
-
-    this.updateWorkItems(filteredItems);
-    return true;
-  }
-
-  // Convenience method for drag and drop
-  moveWorkItem(id: string, newStatus: WorkItemStatus): WorkItem | null {
-    return this.updateWorkItem(id, { status: newStatus });
+  /**
+   * Get current snapshot of work items (synchronous)
+   */
+  getSnapshot(): WorkItem[] {
+    return this.workItemsSubject.value;
   }
 }

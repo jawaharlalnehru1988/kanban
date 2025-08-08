@@ -2,6 +2,9 @@
   <ion-toolbar>
     <ion-title>Kanban Board</ion-title>
     <ion-buttons slot="end">
+      <ion-button fill="clear" (click)="refreshWorkItems()">
+        <ion-icon name="refresh" slot="icon-only"></ion-icon>
+      </ion-button>
       <ion-button fill="outline" (click)="createNewItem()">
         <ion-icon name="add" slot="start"></ion-icon>
         New Item
@@ -18,10 +21,10 @@
         (ionChange)="onFilterTypeChange($event)"
         interface="popover">
         <ion-select-option value="all">All Types</ion-select-option>
-        <ion-select-option [value]="WorkItemType.Epic">Epic</ion-select-option>
-        <ion-select-option [value]="WorkItemType.UserStory">User Story</ion-select-option>
-        <ion-select-option [value]="WorkItemType.Task">Task</ion-select-option>
-        <ion-select-option [value]="WorkItemType.Bug">Bug</ion-select-option>
+        <ion-select-option [value]="WorkItemType.Epic">{{WorkItemTypeLabels[WorkItemType.Epic]}}</ion-select-option>
+        <ion-select-option [value]="WorkItemType.UserStory">{{WorkItemTypeLabels[WorkItemType.UserStory]}}</ion-select-option>
+        <ion-select-option [value]="WorkItemType.Task">{{WorkItemTypeLabels[WorkItemType.Task]}}</ion-select-option>
+        <ion-select-option [value]="WorkItemType.Bug">{{WorkItemTypeLabels[WorkItemType.Bug]}}</ion-select-option>
       </ion-select>
       
       <ion-select 
@@ -30,9 +33,9 @@
         (ionChange)="onFilterPriorityChange($event)"
         interface="popover">
         <ion-select-option value="all">All Priorities</ion-select-option>
-        <ion-select-option [value]="WorkItemPriority.High">High</ion-select-option>
-        <ion-select-option [value]="WorkItemPriority.Medium">Medium</ion-select-option>
-        <ion-select-option [value]="WorkItemPriority.Low">Low</ion-select-option>
+        <ion-select-option [value]="WorkItemPriority.High">{{WorkItemPriorityLabels[WorkItemPriority.High]}}</ion-select-option>
+        <ion-select-option [value]="WorkItemPriority.Medium">{{WorkItemPriorityLabels[WorkItemPriority.Medium]}}</ion-select-option>
+        <ion-select-option [value]="WorkItemPriority.Low">{{WorkItemPriorityLabels[WorkItemPriority.Low]}}</ion-select-option>
       </ion-select>
       
       <ion-input 
@@ -46,7 +49,13 @@
 </ion-header>
 
 <ion-content [fullscreen]="true">
-  <div class="kanban-board">
+  <!-- Loading indicator -->
+  <div *ngIf="loading" class="loading-container">
+    <ion-spinner name="crescent"></ion-spinner>
+    <p>Loading work items...</p>
+  </div>
+
+  <div class="kanban-board" [class.hidden]="loading">
     <div 
       class="kanban-column" 
       *ngFor="let column of columns"
@@ -74,10 +83,10 @@
             
             <div class="item-meta">
               <ion-chip [color]="getTypeColor(item.type)" size="small">
-                {{ item.type }}
+                {{ WorkItemTypeLabels[item.type] }}
               </ion-chip>
               <ion-chip [color]="getPriorityColor(item.priority)" size="small">
-                {{ item.priority }}
+                {{ WorkItemPriorityLabels[item.priority] }}
               </ion-chip>
               <ion-chip *ngIf="item.assignee" color="outline" size="small">
                 {{ item.assignee }}
@@ -85,7 +94,7 @@
             </div>
             
             <div class="item-actions">
-              <ion-button fill="clear" size="small" color="primary">
+              <ion-button fill="clear" size="small" color="primary" (click)="onEditItem(item)">
                 <ion-icon name="create"></ion-icon>
               </ion-button>
               <ion-button fill="clear" size="small" color="danger" (click)="onDeleteItem(item, $event)">
@@ -102,4 +111,130 @@
       </div>
     </div>
   </div>
+
+  <!-- Work Item Form Modal -->
+  <ion-modal [isOpen]="isModalOpen" (didDismiss)="closeModal()">
+    <ng-template>
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>{{ isEditMode ? 'Edit Work Item' : 'Create Work Item' }}</ion-title>
+          <ion-buttons slot="end">
+            <ion-button fill="clear" (click)="closeModal()">
+              <ion-icon name="close"></ion-icon>
+            </ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      
+      <ion-content class="ion-padding">
+        <form [formGroup]="workItemForm" (ngSubmit)="onSubmitForm()">
+          
+          <!-- Title Field -->
+          <ion-item>
+            <ion-label position="stacked">Title *</ion-label>
+            <ion-input 
+              formControlName="title" 
+              placeholder="Enter work item title"
+              [class.ion-invalid]="isFieldInvalid('title')"
+              [class.ion-touched]="workItemForm.get('title')?.touched">
+            </ion-input>
+          </ion-item>
+          <div *ngIf="isFieldInvalid('title')" class="error-message">
+            {{ getFieldError('title') }}
+          </div>
+
+          <!-- Description Field -->
+          <ion-item>
+            <ion-label position="stacked">Description</ion-label>
+            <ion-textarea 
+              formControlName="description" 
+              placeholder="Enter work item description (optional)"
+              rows="3"
+              [class.ion-invalid]="isFieldInvalid('description')"
+              [class.ion-touched]="workItemForm.get('description')?.touched">
+            </ion-textarea>
+          </ion-item>
+          <div *ngIf="isFieldInvalid('description')" class="error-message">
+            {{ getFieldError('description') }}
+          </div>
+
+          <!-- Type Field -->
+          <ion-item>
+            <ion-label position="stacked">Type *</ion-label>
+            <ion-select 
+              formControlName="type" 
+              interface="popover"
+              [class.ion-invalid]="isFieldInvalid('type')"
+              [class.ion-touched]="workItemForm.get('type')?.touched">
+              <ion-select-option [value]="WorkItemType.Epic">{{WorkItemTypeLabels[WorkItemType.Epic]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemType.UserStory">{{WorkItemTypeLabels[WorkItemType.UserStory]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemType.Task">{{WorkItemTypeLabels[WorkItemType.Task]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemType.Bug">{{WorkItemTypeLabels[WorkItemType.Bug]}}</ion-select-option>
+            </ion-select>
+          </ion-item>
+
+          <!-- Priority Field -->
+          <ion-item>
+            <ion-label position="stacked">Priority *</ion-label>
+            <ion-select 
+              formControlName="priority" 
+              interface="popover"
+              [class.ion-invalid]="isFieldInvalid('priority')"
+              [class.ion-touched]="workItemForm.get('priority')?.touched">
+              <ion-select-option [value]="WorkItemPriority.High">{{WorkItemPriorityLabels[WorkItemPriority.High]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemPriority.Medium">{{WorkItemPriorityLabels[WorkItemPriority.Medium]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemPriority.Low">{{WorkItemPriorityLabels[WorkItemPriority.Low]}}</ion-select-option>
+            </ion-select>
+          </ion-item>
+
+          <!-- Assignee Field -->
+          <ion-item>
+            <ion-label position="stacked">Assignee</ion-label>
+            <ion-input 
+              formControlName="assignee" 
+              placeholder="Enter assignee name (optional)"
+              [class.ion-invalid]="isFieldInvalid('assignee')"
+              [class.ion-touched]="workItemForm.get('assignee')?.touched">
+            </ion-input>
+          </ion-item>
+          <div *ngIf="isFieldInvalid('assignee')" class="error-message">
+            {{ getFieldError('assignee') }}
+          </div>
+
+          <!-- Status Field -->
+          <ion-item>
+            <ion-label position="stacked">Status *</ion-label>
+            <ion-select 
+              formControlName="status" 
+              interface="popover"
+              [class.ion-invalid]="isFieldInvalid('status')"
+              [class.ion-touched]="workItemForm.get('status')?.touched">
+              <ion-select-option [value]="WorkItemStatus.NotStarted">{{WorkItemStatusLabels[WorkItemStatus.NotStarted]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemStatus.InProgress">{{WorkItemStatusLabels[WorkItemStatus.InProgress]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemStatus.Completed">{{WorkItemStatusLabels[WorkItemStatus.Completed]}}</ion-select-option>
+              <ion-select-option [value]="WorkItemStatus.Closed">{{WorkItemStatusLabels[WorkItemStatus.Closed]}}</ion-select-option>
+            </ion-select>
+          </ion-item>
+
+          <!-- Form Actions -->
+          <div class="form-actions">
+            <ion-button 
+              type="button" 
+              fill="outline" 
+              color="medium" 
+              (click)="closeModal()">
+              Cancel
+            </ion-button>
+            <ion-button 
+              type="submit" 
+              [disabled]="workItemForm.invalid || loading">
+              <ion-spinner *ngIf="loading" name="crescent" size="small"></ion-spinner>
+              {{ isEditMode ? 'Update' : 'Create' }}
+            </ion-button>
+          </div>
+
+        </form>
+      </ion-content>
+    </ng-template>
+  </ion-modal>
 </ion-content>
