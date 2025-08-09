@@ -58,9 +58,11 @@
   <div class="kanban-board" [class.hidden]="loading">
     <div 
       class="kanban-column" 
+      [class.drop-zone-active]="isDragging"
       *ngFor="let column of columns"
       (dragover)="onDragOver($event)"
-      (drop)="onDrop($event, column.status)">
+      (drop)="onDrop($event, column.status)"
+      (touchend)="onTouchEnd($event, column.status)">
       
       <div class="column-header">
         <h3>{{ column.title }}</h3>
@@ -70,9 +72,13 @@
       <div class="column-content">
         <ion-card 
           class="work-item-card"
+          [class.dragging]="isDragging && draggedItem?.id === item.id"
           *ngFor="let item of getItemsForColumn(column.status); trackBy: trackByItemId"
-          draggable="true"
-          (dragstart)="onDragStart($event, item)">
+          [draggable]="!isMobileDevice"
+          (dragstart)="onDragStart($event, item)"
+          (touchstart)="onTouchStart($event, item)"
+          (touchend)="onTouchEnd($event)"
+          (contextmenu)="isMobileDevice ? onMobileItemLongPress(item) : null">
           
           <ion-card-header>
             <ion-card-title>{{ item.title }}</ion-card-title>
@@ -94,6 +100,15 @@
             </div>
             
             <div class="item-actions">
+              <!-- Mobile: Add move button -->
+              <ion-button 
+                *ngIf="isMobileDevice" 
+                fill="clear" 
+                size="small" 
+                color="secondary" 
+                (click)="showStatusChangeOptions(item)">
+                <ion-icon name="swap-horizontal"></ion-icon>
+              </ion-button>
               <ion-button fill="clear" size="small" color="primary" (click)="onEditItem(item)">
                 <ion-icon name="create"></ion-icon>
               </ion-button>

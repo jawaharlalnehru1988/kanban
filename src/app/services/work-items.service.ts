@@ -19,6 +19,7 @@ const STORAGE_KEY = 'kanban_work_items';
 })
 export class WorkItemsService {
   private readonly baseUrl = 'http://localhost:8080/api/workitems';
+//   private readonly baseUrl = 'https://askharekrishna-backend.onrender.com/api/workitems';
   private workItemsSubject = new BehaviorSubject<WorkItem[]>([]);
   public workItems$: Observable<WorkItem[]> = this.workItemsSubject.asObservable();
   
@@ -134,14 +135,25 @@ export class WorkItemsService {
     console.log('Service: moveWorkItem called with id:', id, 'newStatus:', newStatus);
     this.setLoading(true);
     
-    // Use PUT request with the full update payload to avoid CORS preflight issues
+    // Get current item data
+    const currentItems = this.workItemsSubject.value;
+    const currentItem = currentItems.find(item => item.id === id);
+    
+    if (!currentItem) {
+      this.setLoading(false);
+      return throwError(() => new Error('Item not found for update'));
+    }
+    
+    // Create full update request with current data + new status
     const updateRequest: UpdateWorkItemRequest = {
+      title: currentItem.title,
+      description: currentItem.description,
+      type: currentItem.type,
+      priority: currentItem.priority,
+      assignee: currentItem.assignee,
       status: newStatus
     };
-    
-    console.log('Service: Making PUT request to:', `${this.baseUrl}/${id}`);
-    console.log('Service: Request payload:', updateRequest);
-    
+   
     return this.http.put<WorkItem>(`${this.baseUrl}/${id}`, updateRequest).pipe(
       catchError(this.handleError),
       tap(updatedItem => {

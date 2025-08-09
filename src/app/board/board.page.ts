@@ -22,10 +22,11 @@ import {
   IonModal,
   IonItem,
   IonLabel,
-  IonTextarea
+  IonTextarea,
+  ActionSheetController
 } from '@ionic/angular/standalone';
 import { addIcons } from 'ionicons';
-import { add, funnel, create, trash, close, refresh } from 'ionicons/icons';
+import { add, funnel, create, trash, close, refresh, swapHorizontal, arrowForward } from 'ionicons/icons';
 import { Subscription } from 'rxjs';
 
 import { WorkItemsService } from '../services/work-items.service';
@@ -86,6 +87,11 @@ export class BoardPage implements OnInit, OnDestroy {
   filterPriority: string = 'all';
   filterAssignee: string = '';
 
+  // Mobile drag and drop state
+  draggedItem: WorkItem | null = null;
+  isDragging = false;
+  isMobileDevice = false;
+
   // Column definitions
   columns = [
     { status: WorkItemStatus.NotStarted, title: WorkItemStatusLabels[WorkItemStatus.NotStarted], color: 'medium' },
@@ -104,8 +110,12 @@ export class BoardPage implements OnInit, OnDestroy {
 
   private subscription!: Subscription;
 
-  constructor(private workItemsService: WorkItemsService, private formBuilder: FormBuilder) {
-    addIcons({ add, funnel, create, trash, close, refresh });
+  constructor(
+    private workItemsService: WorkItemsService, 
+    private formBuilder: FormBuilder,
+    private actionSheetController: ActionSheetController
+  ) {
+    addIcons({ add, funnel, create, trash, close, refresh, swapHorizontal, arrowForward });
     
     // Initialize the reactive form
     this.workItemForm = this.formBuilder.group({
@@ -119,6 +129,10 @@ export class BoardPage implements OnInit, OnDestroy {
   }
 
   ngOnInit() {
+    // Detect mobile device
+    this.isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) 
+      || window.innerWidth <= 768;
+
     // Subscribe to work items
     this.subscription = this.workItemsService.getWorkItems().subscribe(items => {
       this.workItems = items;
@@ -171,12 +185,14 @@ export class BoardPage implements OnInit, OnDestroy {
     }
   }
 
-  // Drag and Drop handlers
+  // Drag and Drop handlers (Desktop)
   onDragStart(event: DragEvent, item: WorkItem) {
     if (event.dataTransfer) {
       console.log('Starting drag for item:', item.id, item.title);
       event.dataTransfer.setData('text/plain', item.id);
       event.dataTransfer.effectAllowed = 'move';
+      this.draggedItem = item;
+      this.isDragging = true;
     }
   }
 
@@ -190,49 +206,133 @@ export class BoardPage implements OnInit, OnDestroy {
     const itemId = event.dataTransfer?.getData('text/plain');
     
     if (itemId) {
-      console.log(`Moving work item ${itemId} to status ${targetStatus}`);
-      
-      // Find the item to verify it exists before attempting the move
-      const currentItems = this.workItemsService.getSnapshot();
-      const itemToMove = currentItems.find(item => item.id === itemId);
-      
-      if (!itemToMove) {
-        console.error('Item not found in current items:', itemId);
-        alert('Work item not found. Please refresh the page and try again.');
-        return;
-      }
-      
-      // Check if the item is already in the target status
-      if (itemToMove.status === targetStatus) {
-        console.log('Item is already in the target status, no action needed');
-        return;
-      }
-      
-      console.log('Moving item:', itemToMove.title, 'from', itemToMove.status, 'to', targetStatus);
-      
-      this.workItemsService.moveWorkItem(itemId, targetStatus).subscribe({
-        next: (updatedItem) => {
-          console.log('Work item moved successfully:', updatedItem);
-        },
-        error: (error) => {
-          console.error('Failed to move work item:', error);
-          
-          // Provide more specific error messages
-          if (error.message.includes('404')) {
-            alert('Work item not found on server. It may have been deleted. Please refresh the page.');
-          } else if (error.message.includes('403')) {
-            alert('You do not have permission to move this work item.');
-          } else if (error.message.includes('500')) {
-            alert('Server error occurred while moving the work item. Please try again.');
-          } else {
-            alert(`Failed to move work item: ${error.message || error}`);
-          }
-        }
-      });
+      this.moveItemToStatus(itemId, targetStatus);
     } else {
       console.error('No item ID found in drag data');
       alert('Failed to identify the work item to move. Please try again.');
     }
+    
+    this.draggedItem = null;
+    this.isDragging = false;
+  }
+
+  // Touch handlers for mobile
+  onTouchStart(event: TouchEvent, item: WorkItem) {
+    if (this.isMobileDevice) {
+      event.preventDefault();
+      this.draggedItem = item;
+      this.isDragging = true;
+      console.log('Touch start for item:', item.id, item.title);
+    }
+  }
+
+  onTouchEnd(event: TouchEvent, targetStatus?: WorkItemStatus) {
+    if (this.isMobileDevice && this.isDragging && this.draggedItem) {
+      event.preventDefault();
+      
+      if (targetStatus && targetStatus !== this.draggedItem.status) {
+        this.moveItemToStatus(this.draggedItem.id, targetStatus);
+      }
+    }
+    
+    this.draggedItem = null;
+    this.isDragging = false;
+  }
+
+  // Mobile-specific: Show status change options
+  onMobileItemLongPress(item: WorkItem) {
+    if (this.isMobileDevice) {
+      this.showStatusChangeOptions(item);
+    }
+  }
+
+  // Show action sheet for status change on mobile
+  async showStatusChangeOptions(item: WorkItem) {
+    const availableStatuses = this.columns
+      .filter(col => col.status !== item.status)
+      .map(col => ({
+        text: `Move to ${col.title}`,
+        icon: 'arrow-forward',
+        handler: () => {
+          this.moveItemToStatus(item.id, col.status);
+        }
+      }));
+
+    const actionSheet = await this.actionSheetController.create({
+      header: `Move "${item.title}"`,
+      subHeader: 'Select new status',
+      buttons: [
+        ...availableStatuses,
+        {
+          text: 'Cancel',
+          icon: 'close',
+          role: 'cancel'
+        }
+      ]
+    });
+
+    await actionSheet.present();
+  }
+
+  // Simple status selector fallback (if ActionSheet doesn't work)
+  showStatusSelector(item: WorkItem) {
+    const newStatusMap: { [key: string]: WorkItemStatus } = {
+      '1': WorkItemStatus.NotStarted,
+      '2': WorkItemStatus.InProgress,
+      '3': WorkItemStatus.Completed,
+      '4': WorkItemStatus.Closed
+    };
+
+    const choice = prompt(
+      `Move "${item.title}" to:\n1. Not Started\n2. In Progress\n3. Completed\n4. Closed\n\nEnter number (1-4):`
+    );
+
+    if (choice && newStatusMap[choice] && newStatusMap[choice] !== item.status) {
+      this.moveItemToStatus(item.id, newStatusMap[choice]);
+    }
+  }
+
+  // Common method to move items
+  private moveItemToStatus(itemId: string, targetStatus: WorkItemStatus) {
+    console.log(`Moving work item ${itemId} to status ${targetStatus}`);
+    
+    // Find the item to verify it exists before attempting the move
+    const currentItems = this.workItemsService.getSnapshot();
+    const itemToMove = currentItems.find(item => item.id === itemId);
+    
+    if (!itemToMove) {
+      console.error('Item not found in current items:', itemId);
+      alert('Work item not found. Please refresh the page and try again.');
+      return;
+    }
+    
+    // Check if the item is already in the target status
+    if (itemToMove.status === targetStatus) {
+      console.log('Item is already in the target status, no action needed');
+      return;
+    }
+    
+    console.log('Moving item:', itemToMove.title, 'from', itemToMove.status, 'to', targetStatus);
+    
+    this.workItemsService.moveWorkItem(itemId, targetStatus).subscribe({
+      next: (updatedItem) => {
+        console.log('Work item moved successfully:', updatedItem);
+      },
+      error: (error) => {
+        console.error('Failed to move work item:', error);
+        
+        // Provide more specific error messages
+        if (error.message.includes('404')) {
+          alert('Work item not found on server. It may have been deleted. Please refresh the page.');
+        } else if (error.message.includes('403')) {
+          alert('You do not have permission to move this work item.');
+        } else if (error.message.includes('500')) {
+          alert('Server error occurred while moving the work item. Please try again.');
+        } else {
+          alert(`Failed to move work item: ${error.message || error}`);
+        }
+      }
+    });
   }
 
   onDeleteItem(item: WorkItem, event: Event) {
