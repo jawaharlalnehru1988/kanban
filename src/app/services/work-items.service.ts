@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { BehaviorSubject, Observable, throwError } from 'rxjs';
 import { catchError, tap, map } from 'rxjs/operators';
+import { environment } from '../../environments/environment';
 import { 
   WorkItem, 
   WorkItemType, 
@@ -18,8 +19,7 @@ const STORAGE_KEY = 'kanban_work_items';
   providedIn: 'root'
 })
 export class WorkItemsService {
-//   private readonly baseUrl = 'http://localhost:8080/api/workitems';
-  private readonly baseUrl = 'https://askharekrishna-backend.onrender.com/api/workitems';
+  private readonly baseUrl = environment.apiUrl;
   private workItemsSubject = new BehaviorSubject<WorkItem[]>([]);
   public workItems$: Observable<WorkItem[]> = this.workItemsSubject.asObservable();
   
@@ -27,6 +27,7 @@ export class WorkItemsService {
   public loading$ = this.loadingSubject.asObservable();
 
   constructor(private http: HttpClient) {
+    console.log('WorkItemsService initialized with baseUrl:', this.baseUrl);
     this.loadAllWorkItems();
   }
 
